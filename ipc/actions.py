@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 
 def list_windows_query():
-    return '"Windows"'  # The special IPC identifier Niri understands
+    return '"Windows"'
+
+def list_workspaces_query():
+    return '"Workspaces"'
 
 def move_window_to_workspace_action(window_id, reference, focus=True):
     return {
