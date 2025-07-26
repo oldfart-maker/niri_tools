@@ -44,6 +44,27 @@ niri_move_window.py --match "googlemessages" --target "w" --target_id "messaging
 ```
 
 ---
+### `niri_scratchpad
+
+Moves the currently focused window to a workspace that acts as a scratchpad similar to the sway scratchpad. Use the --acton "put" to put the currently focused window into the workspace you have created to be your scratchpad, for example "scratchpad". Use --action "get" to retrieve the window(s) from your scratchpad workspace. If more than one window exists in the scratchpad workspace a list of windows will be displayed for selection using rofi.
+
+**Usage:**
+```bash
+niri_scratchpad \
+  --acton put|get \
+  --scratchpad_name "scratchpad" \
+```
+
+**Commands:**
+```bash
+# Put focused window in a workspace named "my_scratchpad"
+niri_scratchpad --action "put" --scratchpad_name "my_scratchpad"
+
+# Retrieve the window(s) from the workspace name "my_scratchpad"
+niri_scratchpad --action "get" --scratchpad_name "my_scratchpad"
+```
+
+---
 
 ### `niri_tail_event_stream.py`
 

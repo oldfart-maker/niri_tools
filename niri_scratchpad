@@ -1,0 +1,62 @@
+#!/bin/bash
+
+# Import Current Theme
+DIR="$HOME/.config/niri"
+RASI="$DIR/rofi/windows.rasi"
+
+# Defaults
+ACTION=""
+SCRATCHPAD_NAME=""
+
+# Parse arguments
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        --action) ACTION="$2"; shift ;;
+        --scratchpad_name) SCRATCHPAD_NAME="$2"; shift ;;
+        *) echo "Unknown parameter: $1"; exit 1 ;;
+    esac
+    shift
+done
+
+if [[ -z "$ACTION" || -z "$SCRATCHPAD_NAME" ]]; then
+    echo "Usage: $0 --action [get|put] --scratchpad_name <name>"
+    exit 1
+fi
+
+# ACTION: PUT
+if [[ "$ACTION" == "put" ]]; then
+    echo "Putting current focused window into scratchpad '$SCRATCHPAD_NAME'..."
+    niri msg action move-window-to-workspace --focus false "$SCRATCHPAD_NAME"
+    exit $?
+fi
+
+# ACTION: GET
+if [[ "$ACTION" == "get" ]]; then
+    json_output=$(~/projects/niri_toolkit/niri-scratchpad.py --scratchpad_name "$SCRATCHPAD_NAME")
+
+    count=$(echo "$json_output" | jq 'length')
+
+    if [ "$count" -gt 1 ]; then
+        rofi_input=$(echo "$json_output" | jq -r '.[] | "\(.id)|\(.app_id): \(.title)"')
+        selected=$(echo "$rofi_input" | rofi -dmenu -i -p "Select window:" -theme ${RASI})
+
+        if [ -n "$selected" ]; then
+            window_id=$(echo "$selected" | cut -d'|' -f1)
+            ~/projects/niri_toolkit/niri-move-window.py --match "$window_id" --target "m" --target_id "HDMI-A-2" --focus
+        fi
+
+    elif [ "$count" -eq 1 ]; then
+        window_id=$(echo "$json_output" | jq -r '.[0].id')
+        ~/projects/niri_toolkit/niri-move-window.py --match "$window_id" --target "m" --target_id "HDMI-A-2" --focus
+
+    else
+        echo "No windows found in scratchpad '$SCRATCHPAD_NAME'"
+        exit 1
+    fi
+
+    exit 0
+fi
+
+# Invalid action
+echo "Invalid action: $ACTION"
+exit 1
