@@ -1,0 +1,31 @@
+#!/bin/bash
+
+IMG="$1"
+MODE="$2"
+DIR="$HOME/.config/niri"
+RASI="$DIR/rofi/windows.rasi"
+
+# Open the selected image in preview mode
+feh --auto-zoom --scale-down --geometry 1200x900 "$IMG"
+
+echo $MODE
+
+if [[ "$MODE" == "noprompt" ]]; then
+    wl-copy < "$IMG"
+    notify-send "✅ Screenshot copied to clipboard" "$(basename "$IMG")"
+    niri msg action 'close-window'
+    exit 0
+fi
+
+# Ask what to do next via rofi
+CHOICE=$(printf "📋 Copy to clipboard and exit\n🔁 Return to thumbnails" | rofi -dmenu -p "What do you want to do?" -theme ${RASI})
+
+if [[ "$CHOICE" == "📋 Copy to clipboard and exit" ]]; then
+    wl-copy < "$IMG"
+    notify-send "✅ Screenshot copied to clipboard" "$(basename "$IMG")"
+    niri msg action 'close-window'
+    exit 0
+fi
+
+# Just return — feh grid still open
+exit 0

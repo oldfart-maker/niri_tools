@@ -1,0 +1,19 @@
+#!/bin/bash
+
+SCREENSHOT_DIR="$HOME/Pictures/screenshots"
+
+
+# Sort by newest first
+IMAGES=$(ls -t "$SCREENSHOT_DIR"/*.png)
+
+# Show thumbnails in a grid with feh
+SELECTED=$(feh \
+  --quiet \
+  --thumbnails \
+  --index-info "" \
+  --thumb-width 300 \
+  --thumb-height 200 \
+  --limit-width 1200 \
+  --geometry 1200x800 \
+  --action "~/projects/niri_toolkit/niri-screenshot-select %f noprompt" \
+  $IMAGES)
