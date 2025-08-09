@@ -1,0 +1,3 @@
+#!/bin/bash
+
+emacsclient -c -s emacs-alt -e '(my/image-picker-thumbnail-mode)'

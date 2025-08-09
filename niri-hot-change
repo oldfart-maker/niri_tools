@@ -1,0 +1,3 @@
+#!/bin/bash
+
+python3 ~/projects/niri_toolkit/niri-hot-change.py
