@@ -1,23 +1,39 @@
-import tkinter as tk
-from tkinter import messagebox, colorchooser
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 import os
 import shlex
+from functools import partial
 
-# Config file path
+from PyQt5.QtWidgets import (
+    QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
+    QPushButton, QColorDialog, QGroupBox, QCheckBox, QMessageBox, QScrollArea,
+    QFrame
+)
+from PyQt5.QtGui import QColor
+from PyQt5.QtCore import Qt
+
+# ----------------------------------------------------------------------------- 
+# Config paths & IO
+# -----------------------------------------------------------------------------
+
 CONFIG_PATH = os.path.expanduser('~/.config/niri/config.kdl')
 
-def load_config():
+def load_config_text():
     """Read the entire config file."""
     if not os.path.exists(CONFIG_PATH):
         raise FileNotFoundError(f"Config file not found: {CONFIG_PATH}")
-    with open(CONFIG_PATH, 'r') as f:
+    with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
         return f.read()
 
-def save_config(content):
+def save_config_text(content):
     """Write back the updated config."""
-    with open(CONFIG_PATH, 'w') as f:
+    with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
         f.write(content)
-    print("Config saved! Changes should apply immediately in Niri.")
+
+# ----------------------------------------------------------------------------- 
+# Parsing + reconstruction
+# -----------------------------------------------------------------------------
 
 def find_focus_ring_block(content):
     """Find the start and end lines of the focus-ring block."""
@@ -44,26 +60,29 @@ def parse_focus_ring(lines, start, end):
         if not stripped:
             continue  # Skip empty lines
         enabled = not stripped.startswith('//')
-        if not enabled:
-            clean = stripped.lstrip('/ ').strip()
-        else:
-            clean = stripped
-        # Parse clean into tokens
+        clean = stripped.lstrip('/ ').strip() if not enabled else stripped
+
         try:
             tokens = shlex.split(clean)
         except ValueError:
-            continue  # Invalid line, skip
+            # Skip malformed lines rather than crashing
+            continue
+
         if not tokens:
             continue
+
         key = tokens[0]
+
         if key == 'off':
             item = {'type': 'off', 'enabled': enabled, 'value': None, 'key': 'off'}
+
         elif len(tokens) == 2 and key.endswith('-color'):
             value = tokens[1].strip('"')
             if value.startswith('#'):
                 item = {'type': 'color', 'enabled': enabled, 'value': value, 'key': key}
             else:
                 item = {'type': 'simple', 'enabled': enabled, 'value': tokens[1], 'key': key}
+
         elif 'gradient' in key and len(tokens) > 1:
             params = {}
             for t in tokens[1:]:
@@ -74,11 +93,13 @@ def parse_focus_ring(lines, start, end):
                 item = {'type': 'gradient', 'enabled': enabled, 'value': params, 'key': key}
             else:
                 continue
+
         else:
             if len(tokens) == 2:
                 item = {'type': 'simple', 'enabled': enabled, 'value': tokens[1], 'key': key}
             else:
                 continue
+
         items.append(item)
     return items
 
@@ -88,21 +109,25 @@ def reconstruct_block(items):
     for item in items:
         if item['type'] == 'off':
             assembled = 'off'
+
         elif item['type'] == 'simple':
             assembled = f"{item['key']} {item['value']}"
+
         elif item['type'] == 'color':
             assembled = f"{item['key']} \"{item['value']}\""
+
         elif item['type'] == 'gradient':
             params = item['value']
             param_strs = []
             for pkey, pval in params.items():
-                if pval.startswith('#'):
+                if isinstance(pval, str) and pval.startswith('#'):
                     param_strs.append(f'{pkey}="{pval}"')
-                elif pval.isdigit():
+                elif isinstance(pval, str) and pval.isdigit():
                     param_strs.append(f'{pkey}={pval}')
                 else:
                     param_strs.append(f'{pkey}="{pval}"')
             assembled = f"{item['key']} {' '.join(param_strs)}"
+
         if item['enabled']:
             new_block.append(f'                    {assembled}')
         else:
@@ -110,117 +135,234 @@ def reconstruct_block(items):
     new_block.append('            }')
     return '\n'.join(new_block)
 
-def update_preview(preview_label, color_var):
-    """Update the background color of the preview label, handling invalid colors."""
-    color = color_var.get()
-    try:
-        preview_label.config(bg=color)
-    except tk.TclError:
-        pass  # Invalid color, keep previous or default
+# ----------------------------------------------------------------------------- 
+# Qt widgets
+# -----------------------------------------------------------------------------
 
-def create_gui(items):
-    """Build the Tkinter GUI for editing."""
-    root = tk.Tk()
-    root.title("Niri Focus Ring Editor")
-    root.geometry("600x600")  # Larger to fit gradients
-    root.attributes('-topmost', True)  # Stay on top
+def _color_preview(color_hex: str) -> QFrame:
+    frame = QFrame()
+    frame.setFixedSize(32, 18)
+    frame.setFrameShape(QFrame.Box)
+    frame.setStyleSheet(f"background-color: {color_hex or '#000000'};")
+    return frame
 
-    row = 0
-    for idx, item in enumerate(items):
-        frame = tk.Frame(root)
-        frame.grid(row=row, column=0, columnspan=2, padx=10, pady=5, sticky='w')
-        item['check_var'] = tk.BooleanVar(value=item['enabled'])
-        check = tk.Checkbutton(frame, text="", variable=item['check_var'])
-        check.pack(side=tk.LEFT)
+class FocusRingEditor(QWidget):
+    def __init__(self, items, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Niri Focus Ring Editor (Qt)")
+        self.items = items  # list of dicts; we’ll attach widgets to each dict
 
-        if item['type'] == 'off':
-            tk.Label(frame, text="off").pack(side=tk.LEFT)
-        elif item['type'] == 'simple':
-            tk.Label(frame, text=f"{item['key']}: ").pack(side=tk.LEFT)
-            item['entry_var'] = tk.StringVar(value=item['value'])
-            tk.Entry(frame, textvariable=item['entry_var'], width=10).pack(side=tk.LEFT)
-        elif item['type'] == 'color':
-            tk.Label(frame, text=f"{item['key']}: ").pack(side=tk.LEFT)
-            item['color_var'] = tk.StringVar(value=item['value'])
-            entry = tk.Entry(frame, textvariable=item['color_var'], width=15)
-            entry.pack(side=tk.LEFT)
-            def pick_color(color_var):
-                color = colorchooser.askcolor(initialcolor=color_var.get())[1]
-                if color:
-                    color_var.set(color)
-            tk.Button(frame, text="Pick", command=lambda cv=item['color_var']: pick_color(cv)).pack(side=tk.LEFT)
-            # Color preview
-            preview_label = tk.Label(frame, width=4, height=1, bg=item['color_var'].get(), relief="solid", borderwidth=1)
-            preview_label.pack(side=tk.LEFT, padx=5)
-            item['color_var'].trace("w", lambda *args, pl=preview_label, cv=item['color_var']: update_preview(pl, cv))
-        elif item['type'] == 'gradient':
-            tk.Label(frame, text=f"{item['key']}: ").pack(side=tk.LEFT)
-            # From
-            tk.Label(frame, text="from ").pack(side=tk.LEFT)
-            item['from_var'] = tk.StringVar(value=item['value'].get('from', '#000000'))
-            from_entry = tk.Entry(frame, textvariable=item['from_var'], width=15)
-            from_entry.pack(side=tk.LEFT)
-            tk.Button(frame, text="Pick", command=lambda cv=item['from_var']: pick_color(cv)).pack(side=tk.LEFT)
-            from_preview = tk.Label(frame, width=4, height=1, bg=item['from_var'].get(), relief="solid", borderwidth=1)
-            from_preview.pack(side=tk.LEFT, padx=5)
-            item['from_var'].trace("w", lambda *args, pl=from_preview, cv=item['from_var']: update_preview(pl, cv))
-            # To
-            tk.Label(frame, text=" to ").pack(side=tk.LEFT)
-            item['to_var'] = tk.StringVar(value=item['value'].get('to', '#000000'))
-            to_entry = tk.Entry(frame, textvariable=item['to_var'], width=15)
-            to_entry.pack(side=tk.LEFT)
-            tk.Button(frame, text="Pick", command=lambda cv=item['to_var']: pick_color(cv)).pack(side=tk.LEFT)
-            to_preview = tk.Label(frame, width=4, height=1, bg=item['to_var'].get(), relief="solid", borderwidth=1)
-            to_preview.pack(side=tk.LEFT, padx=5)
-            item['to_var'].trace("w", lambda *args, pl=to_preview, cv=item['to_var']: update_preview(pl, cv))
-            # Angle
-            tk.Label(frame, text=" angle ").pack(side=tk.LEFT)
-            item['angle_var'] = tk.StringVar(value=item['value'].get('angle', '45'))
-            tk.Entry(frame, textvariable=item['angle_var'], width=5).pack(side=tk.LEFT)
-            # Relative-to
-            tk.Label(frame, text=" relative-to ").pack(side=tk.LEFT)
-            item['rel_var'] = tk.StringVar(value=item['value'].get('relative-to', 'workspace-view'))
-            tk.Entry(frame, textvariable=item['rel_var'], width=20).pack(side=tk.LEFT)
-        row += 1
+        # Scrollable area
+        outer = QVBoxLayout(self)
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        container = QWidget()
+        layout = QVBoxLayout(container)
 
-    status_label = tk.Label(root, text="", fg="green")
-    status_label.grid(row=row, column=0, columnspan=2, pady=5)
+        # Build per-item UIs
+        for item in self.items:
+            g = QGroupBox(item['key'])
+            gl = QHBoxLayout(g)
 
-    def save_changes():
-        for item in items:
-            item['enabled'] = item['check_var'].get()
-            if item['type'] == 'simple':
-                item['value'] = item['entry_var'].get()
+            # checkbox for enabled on all except 'width' special-case
+            add_enable_box = not (item['type'] == 'simple' and item['key'] == 'width')
+
+            if add_enable_box:
+                item['check'] = QCheckBox(self)
+                item['check'].setChecked(bool(item['enabled']))
+                gl.addWidget(item['check'])
+
+            if item['type'] == 'off':
+                gl.addWidget(QLabel("off", self))
+
+            elif item['type'] == 'simple':
+                gl.addWidget(QLabel(item['key'] + ":", self))
+                item['entry'] = QLineEdit(str(item['value']), self)
+                item['entry'].setFixedWidth(80)
+                gl.addWidget(item['entry'])
+
             elif item['type'] == 'color':
-                item['value'] = item['color_var'].get()
+                gl.addWidget(QLabel(item['key'] + ":", self))
+                item['color_edit'] = QLineEdit(item.get('value', ''), self)
+                item['color_edit'].setFixedWidth(110)
+                gl.addWidget(item['color_edit'])
+
+                # color picker
+                btn = QPushButton("Pick", self)
+                gl.addWidget(btn)
+                # preview
+                item['preview'] = _color_preview(item.get('value', '#000000'))
+                gl.addWidget(item['preview'])
+
+                # bind item; ignore clicked(bool)
+                btn.clicked.connect(partial(self._pick_color_for, item))
+
+                # keep preview in sync if typed
+                item['color_edit'].textChanged.connect(
+                    lambda txt, it=item: it['preview'].setStyleSheet(f"background-color: {txt or '#000000'};")
+                )
+
             elif item['type'] == 'gradient':
-                item['value']['from'] = item['from_var'].get()
-                item['value']['to'] = item['to_var'].get()
-                item['value']['angle'] = item['angle_var'].get()
-                item['value']['relative-to'] = item['rel_var'].get()
-        
-        content = load_config()  # Reload to avoid external changes conflicts
-        start, end, lines = find_focus_ring_block(content)
-        new_block = reconstruct_block(items)
-        
-        # Replace the old block
-        updated_lines = lines[:start] + new_block.splitlines() + lines[end + 1:]
-        updated_content = '\n'.join(updated_lines)
-        
-        save_config(updated_content)
-        status_label.config(text="Changes saved! Check Niri.")
-        root.after(3000, lambda: status_label.config(text=""))  # Clear message after 3 seconds
+                gl.addWidget(QLabel(item['key'] + ":", self))
 
-    tk.Button(root, text="Save", command=save_changes).grid(row=row + 1, column=0, columnspan=2, pady=10)
-    
-    root.mainloop()
+                # from
+                gl.addWidget(QLabel("from", self))
+                item['from_edit'] = QLineEdit(item['value'].get('from', ''), self)
+                item['from_edit'].setFixedWidth(110)
+                gl.addWidget(item['from_edit'])
+                from_btn = QPushButton("Pick", self)
+                gl.addWidget(from_btn)
+                item['from_preview'] = _color_preview(item['value'].get('from', '#000000'))
+                gl.addWidget(item['from_preview'])
+                from_btn.clicked.connect(partial(self._pick_from_color, item))
+                item['from_edit'].textChanged.connect(
+                    lambda txt, it=item: it['from_preview'].setStyleSheet(f"background-color: {txt or '#000000'};")
+                )
 
-if __name__ == "__main__":
+                # to
+                gl.addWidget(QLabel("to", self))
+                item['to_edit'] = QLineEdit(item['value'].get('to', ''), self)
+                item['to_edit'].setFixedWidth(110)
+                gl.addWidget(item['to_edit'])
+                to_btn = QPushButton("Pick", self)
+                gl.addWidget(to_btn)
+                item['to_preview'] = _color_preview(item['value'].get('to', '#000000'))
+                gl.addWidget(item['to_preview'])
+                to_btn.clicked.connect(partial(self._pick_to_color, item))
+                item['to_edit'].textChanged.connect(
+                    lambda txt, it=item: it['to_preview'].setStyleSheet(f"background-color: {txt or '#000000'};")
+                )
+
+                # angle
+                gl.addWidget(QLabel("angle", self))
+                item['angle_edit'] = QLineEdit(str(item['value'].get('angle', '')), self)
+                item['angle_edit'].setFixedWidth(60)
+                gl.addWidget(item['angle_edit'])
+
+                # relative-to
+                gl.addWidget(QLabel("relative-to", self))
+                item['rel_edit'] = QLineEdit(item['value'].get('relative-to', ''), self)
+                item['rel_edit'].setFixedWidth(160)
+                gl.addWidget(item['rel_edit'])
+
+            gl.addStretch(1)
+            g.setLayout(gl)
+            layout.addWidget(g)
+
+        # Save button + status
+        btn_row = QHBoxLayout()
+        save_btn = QPushButton("Save Configuration", self)
+        btn_row.addWidget(save_btn)
+        self.status_label = QLabel("", self)
+        self.status_label.setStyleSheet("color: green;")
+        btn_row.addWidget(self.status_label, alignment=Qt.AlignLeft)
+        layout.addLayout(btn_row)
+
+        layout.addStretch(1)
+        scroll.setWidget(container)
+        outer.addWidget(scroll)
+
+        save_btn.clicked.connect(self.on_save)
+
+        # Size hint
+        self.resize(860, 600)
+
+    # ------------------------------------------------------------------ 
+    # Color pickers (ignore clicked(bool) via partial)
+    # ------------------------------------------------------------------ 
+
+    def _pick_color_for(self, it, _checked=False):
+        col0 = it['color_edit'].text() or "#000000"
+        color = QColorDialog.getColor(QColor(col0), self, "Pick color")
+        if color.isValid():
+            it['color_edit'].setText(color.name())
+            it['preview'].setStyleSheet(f"background-color: {color.name()};")
+
+    def _pick_from_color(self, it, _checked=False):
+        c0 = it['from_edit'].text() or "#000000"
+        color = QColorDialog.getColor(QColor(c0), self, "Pick color (from)")
+        if color.isValid():
+            it['from_edit'].setText(color.name())
+            it['from_preview'].setStyleSheet(f"background-color: {color.name()};")
+
+    def _pick_to_color(self, it, _checked=False):
+        c0 = it['to_edit'].text() or "#000000"
+        color = QColorDialog.getColor(QColor(c0), self, "Pick color (to)")
+        if color.isValid():
+            it['to_edit'].setText(color.name())
+            it['to_preview'].setStyleSheet(f"background-color: {color.name()};")
+
+    # ------------------------------------------------------------------ 
+    # Save
+    # ------------------------------------------------------------------ 
+
+    def on_save(self):
+        """Collect UI state -> items -> reconstruct -> replace block -> write."""
+        # Collect values back from widgets
+        for it in self.items:
+            if it['type'] == 'off':
+                if 'check' in it:
+                    it['enabled'] = it['check'].isChecked()
+
+            elif it['type'] == 'simple':
+                if it['key'] == 'width':
+                    if 'entry' in it:
+                        it['value'] = it['entry'].text().strip()
+                else:
+                    if 'check' in it:
+                        it['enabled'] = it['check'].isChecked()
+                    if 'entry' in it:
+                        it['value'] = it['entry'].text().strip()
+
+            elif it['type'] == 'color':
+                if 'check' in it:
+                    it['enabled'] = it['check'].isChecked()
+                if 'color_edit' in it:
+                    it['value'] = it['color_edit'].text().strip()
+
+            elif it['type'] == 'gradient':
+                if 'check' in it:
+                    it['enabled'] = it['check'].isChecked()
+                v = it['value']
+                if 'from_edit' in it:
+                    v['from'] = it['from_edit'].text().strip()
+                if 'to_edit' in it:
+                    v['to'] = it['to_edit'].text().strip()
+                if 'angle_edit' in it:
+                    v['angle'] = it['angle_edit'].text().strip()
+                if 'rel_edit' in it:
+                    v['relative-to'] = it['rel_edit'].text().strip()
+
+        # Reconstruct + write
+        try:
+            content = load_config_text()  # reload to avoid external drift
+            start, end, lines = find_focus_ring_block(content)
+            new_block = reconstruct_block(self.items)
+            updated_lines = lines[:start] + new_block.splitlines() + lines[end + 1:]
+            updated = '\n'.join(updated_lines)
+            save_config_text(updated)
+            self.status_label.setText("Changes saved! Check Niri.")
+        except Exception as e:
+            QMessageBox.critical(self, "Save Error", str(e))
+
+# ----------------------------------------------------------------------------- 
+# main
+# -----------------------------------------------------------------------------
+
+def main():
     try:
-        content = load_config()
+        content = load_config_text()
         start, end, lines = find_focus_ring_block(content)
         items = parse_focus_ring(lines, start, end)
-        create_gui(items)
     except Exception as e:
-        print(f"Error: {e}")
-        # Could add GUI error if desired
+        app = QApplication([])
+        QMessageBox.critical(None, "Error", str(e))
+        return
+
+    app = QApplication([])
+    w = FocusRingEditor(items)
+    w.show()
+    app.exec_()
+
+if __name__ == "__main__":
+    main()
